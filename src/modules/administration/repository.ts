@@ -1,5 +1,5 @@
 import { query } from "../../shared/db.js";
-import type { Organization, TeamsInstallation } from "./domain.js";
+import type { JiraProject, Organization, TeamsInstallation } from "./domain.js";
 
 interface OrgRow {
   id: string;
@@ -59,6 +59,37 @@ export async function setDigestChannel(organizationId: string, teamId: string, c
      VALUES ($1, 'team', $2, $3)`,
     [organizationId, teamId, channelId]
   );
+}
+
+export async function upsertJiraProject(organizationId: string, projectKey: string, isQaProject: boolean): Promise<JiraProject> {
+  const rows = await query<{ id: string; organization_id: string; jira_project_key: string; is_qa_project: boolean }>(
+    `INSERT INTO jira_projects (organization_id, jira_project_key, is_qa_project)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (organization_id, jira_project_key) DO UPDATE SET is_qa_project = EXCLUDED.is_qa_project
+     RETURNING *`,
+    [organizationId, projectKey, isQaProject]
+  );
+  const row = rows[0]!;
+  return { id: row.id, organizationId: row.organization_id, projectKey: row.jira_project_key, isQaProject: row.is_qa_project };
+}
+
+export async function getJiraProjectByKey(organizationId: string, projectKey: string): Promise<JiraProject | undefined> {
+  const rows = await query<{ id: string; organization_id: string; jira_project_key: string; is_qa_project: boolean }>(
+    `SELECT * FROM jira_projects WHERE organization_id = $1 AND jira_project_key = $2`,
+    [organizationId, projectKey]
+  );
+  const row = rows[0];
+  return row ? { id: row.id, organizationId: row.organization_id, projectKey: row.jira_project_key, isQaProject: row.is_qa_project } : undefined;
+}
+
+export async function listJiraProjects(organizationId: string, qaOnly = false): Promise<JiraProject[]> {
+  const rows = await query<{ id: string; organization_id: string; jira_project_key: string; is_qa_project: boolean }>(
+    qaOnly
+      ? `SELECT * FROM jira_projects WHERE organization_id = $1 AND is_qa_project = TRUE`
+      : `SELECT * FROM jira_projects WHERE organization_id = $1`,
+    [organizationId]
+  );
+  return rows.map((row) => ({ id: row.id, organizationId: row.organization_id, projectKey: row.jira_project_key, isQaProject: row.is_qa_project }));
 }
 
 export async function listIntegrationFailures(organizationId: string, resolvedOnly = false) {

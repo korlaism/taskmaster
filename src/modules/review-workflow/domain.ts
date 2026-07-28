@@ -7,6 +7,10 @@ export interface ReviewRequest {
   reviewerId: string;
   jiraIssueKey: string;
   pullRequestId: string | null;
+  /** Raw PR URL, supplied directly by the requester — a stand-in until the
+   * git-integration ingestion pipeline (Phase 5, docs/09) populates pull_request_id
+   * from real webhook data. */
+  pullRequestUrl: string | null;
   branchName: string | null;
   commitSha: string | null;
   requesterNote: string | null;

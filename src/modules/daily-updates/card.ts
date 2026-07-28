@@ -6,7 +6,11 @@ export interface DailyUpdateCardContext {
   cycleId: string;
   cycleDate: string;
   userId: string;
-  idempotencyKey: string;
+  /** Independent keys per action — sharing one key across both buttons meant clicking
+   * "Submit update" after "Save draft" on the same card looked like a retry of the
+   * draft (same key already on file) and was silently dropped instead of applied. */
+  draftIdempotencyKey: string;
+  submitIdempotencyKey: string;
   suggestions: JiraIssueSuggestion[];
 }
 
@@ -45,12 +49,12 @@ export function buildDailyUpdateCard(ctx: DailyUpdateCardContext): AdaptiveCardP
       {
         type: "Action.Submit",
         title: "Save draft",
-        data: { cycleId: ctx.cycleId, userId: ctx.userId, idempotencyKey: ctx.idempotencyKey, intent: "draft" },
+        data: { cycleId: ctx.cycleId, userId: ctx.userId, idempotencyKey: ctx.draftIdempotencyKey, intent: "draft" },
       },
       {
         type: "Action.Submit",
         title: "Submit update",
-        data: { cycleId: ctx.cycleId, userId: ctx.userId, idempotencyKey: ctx.idempotencyKey, intent: "submit" },
+        data: { cycleId: ctx.cycleId, userId: ctx.userId, idempotencyKey: ctx.submitIdempotencyKey, intent: "submit" },
       },
     ],
   };

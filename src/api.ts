@@ -1,22 +1,29 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { env } from "./config/env.js";
-import { bootstrapOrganizationFromEnv, createAppContext } from "./composition.js";
+import { bootstrapOrganizationFromEnv, createAppContext, type AppContext } from "./composition.js";
 import { runOneTick } from "./runtime-tick.js";
 import { AppError } from "./shared/errors.js";
 import { childLogger } from "./shared/logger.js";
 import { startTelemetry } from "./shared/telemetry.js";
-import { createLocalSimRouter } from "./modules/teams-adapter/index.js";
+import { createLocalSimRouter, type LocalSimTeamsClient } from "./modules/teams-adapter/index.js";
+import { parseQaTicketSubmission } from "./modules/qa-ticket-workflow/index.js";
 
 const log = childLogger({ module: "api" });
 
 async function main() {
   startTelemetry();
   await bootstrapOrganizationFromEnv();
-  const ctx = createAppContext();
 
   const app = express();
   app.use(express.json());
+
+  // In live mode, the Teams App needs to be built against THIS express instance
+  // (ExpressAdapter registers the /api/messages route on it) before the rest of the
+  // app context is constructed, since teamsAdapter/teamsClient depend on it.
+  const teamsApp = env.TEAMS_ADAPTER_MODE === "live" ? await setupLiveTeamsApp(app) : undefined;
+  const ctx = createAppContext({ teamsApp });
+  if (teamsApp) registerTeamsHandlers(teamsApp, ctx);
 
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -50,6 +57,8 @@ async function main() {
 
   // --- Simulated Teams install events (stand-ins for the real activity handler that
   // fires when a user adds the personal app, or the app is added to a team/channel).
+  // Only meaningful in local-sim mode — in live mode, install.add (registered below)
+  // does this for real.
   app.post("/teams/install/personal", async (req, res, next) => {
     try {
       const { userId, serviceUrl, conversationId, tenantId } = req.body as {
@@ -108,6 +117,20 @@ async function main() {
     }
   });
 
+  app.post("/admin/jira-projects", async (req, res, next) => {
+    try {
+      const { actorUserId, projectKey, isQaProject } = req.body as {
+        actorUserId: string;
+        projectKey: string;
+        isQaProject?: boolean;
+      };
+      const project = await ctx.administration.configureJiraProject(actorUserId, env.ORG_ID, projectKey, !!isQaProject);
+      res.json(project);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.post("/users/:userId/preferences/reminder-time", async (req, res, next) => {
     try {
       await ctx.identity.requireEnabled(req.params.userId);
@@ -145,7 +168,68 @@ async function main() {
     }
   });
 
-  app.use(createLocalSimRouter(ctx.teamsClient));
+  // --- Review workflow: "Request review for SIM40-1234 from Lead Name" and the
+  // reviewer's Acknowledge/Approve/Needs-changes response, both reachable over HTTP
+  // for local-sim/dev testing; the real Teams card wires into the same service calls
+  // (see registerTeamsHandlers below). ---
+  app.post("/reviews/request", async (req, res, next) => {
+    try {
+      const body = req.body as {
+        requesterId: string;
+        reviewerId: string;
+        jiraIssueKey: string;
+        pullRequestUrl?: string;
+        branchName?: string;
+        commitSha?: string;
+        requesterNote?: string;
+        idempotencyKey: string;
+      };
+      const request = await ctx.reviewWorkflow.requestReview({ organizationId: env.ORG_ID, ...body });
+      res.status(201).json(request);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.post("/reviews/:id/decision", async (req, res, next) => {
+    try {
+      const { actorUserId, decision } = req.body as { actorUserId: string; decision: string };
+      await ctx.reviewWorkflow.recordDecision({
+        organizationId: env.ORG_ID,
+        reviewId: req.params.id,
+        actingUserId: actorUserId,
+        decision: decision as any,
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- QA ticket workflow ---
+  app.post("/qa-tickets", async (req, res, next) => {
+    try {
+      const body = req.body as { requesterId: string; projectKey: string } & Record<string, unknown>;
+      const project = await ctx.administration.getJiraProjectByKey(env.ORG_ID, body.projectKey);
+      if (!project) throw new AppError(`Unknown Jira project key: ${body.projectKey}`, "not_found");
+      const { form, idempotencyKey } = parseQaTicketSubmission(body);
+      const result = await ctx.qaTicketWorkflow.createTicket({
+        organizationId: env.ORG_ID,
+        requesterId: body.requesterId,
+        jiraProjectId: project.id,
+        jiraProjectKey: project.projectKey,
+        form,
+        idempotencyKey,
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  if (env.TEAMS_ADAPTER_MODE === "local-sim") {
+    app.use(createLocalSimRouter(ctx.teamsClient as LocalSimTeamsClient));
+  }
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const appErr = err as AppError;
@@ -171,6 +255,117 @@ async function main() {
       }
     }, env.SCHEDULER_TICK_INTERVAL_MS);
   }
+}
+
+/**
+ * Builds the live Teams App bound to this process's Express server. UNVERIFIED
+ * against a real tenant (see docs/00, docs/02) — written against @microsoft/teams.apps'
+ * published types and Microsoft Learn's documented quickstart pattern.
+ */
+async function setupLiveTeamsApp(expressApp: express.Express) {
+  const { App, ExpressAdapter } = await import("@microsoft/teams.apps");
+  const adapter = new ExpressAdapter(expressApp);
+  const teamsApp = new App({
+    httpServerAdapter: adapter,
+    clientId: env.CLIENT_ID,
+    clientSecret: env.CLIENT_SECRET,
+    tenantId: env.TENANT_ID,
+  });
+  await teamsApp.initialize();
+  return teamsApp;
+}
+
+/**
+ * Wires the real Teams activity handlers to the SAME service methods the HTTP routes
+ * above call — the card payload shapes are the single contract both entry points
+ * parse, so there's only one place that logic can drift.
+ */
+function registerTeamsHandlers(teamsApp: import("@microsoft/teams.apps").App, ctx: AppContext) {
+  teamsApp.on("install.add", async ({ activity }) => {
+    const isPersonal = activity.conversation.conversationType === "personal";
+    if (isPersonal) {
+      const user = await ctx.identity.ensureUser({
+        organizationId: env.ORG_ID,
+        entraObjectId: activity.from.aadObjectId ?? activity.from.id,
+        displayName: activity.from.name ?? "Unknown",
+        email: null,
+      });
+      await ctx.teamsAdapter.captureConversationReference({
+        organizationId: env.ORG_ID,
+        subjectType: "user",
+        subjectId: user.id,
+        serviceUrl: activity.serviceUrl ?? "",
+        conversationId: activity.conversation.id,
+        tenantId: activity.conversation.tenantId ?? "",
+      });
+    } else {
+      // Team/channel install — channelId extraction from channelData is best-effort
+      // and unverified against a real payload; see docs/02.
+      const channelId = ((activity as any).channelData?.channel?.id as string | undefined) ?? activity.conversation.id;
+      const teamId = ((activity as any).channelData?.team?.id as string | undefined) ?? activity.conversation.id;
+      await ctx.teamsAdapter.captureConversationReference({
+        organizationId: env.ORG_ID,
+        subjectType: "channel",
+        subjectId: channelId,
+        serviceUrl: activity.serviceUrl ?? "",
+        conversationId: activity.conversation.id,
+        tenantId: activity.conversation.tenantId ?? "",
+      });
+      // Registering this as THE digest channel on every install event is a POC
+      // simplification — production should require an explicit admin confirmation
+      // step rather than auto-adopting whichever channel the app was added to last.
+      log.info({ teamId, channelId }, "team/channel install captured — admin must still confirm via setDigestChannel");
+    }
+  });
+
+  teamsApp.on("message", async ({ activity }) => {
+    const value = activity.value as Record<string, unknown> | undefined;
+    if (!value) return; // plain text message, no card action in this app
+
+    try {
+      if (value.cycleId && value.userId && value.idempotencyKey) {
+        const cycle = await ctx.dailyUpdates.getCycleById(String(value.cycleId));
+        if (cycle) await ctx.dailyUpdates.submitFromCard(cycle, value);
+        return;
+      }
+      if (value.reviewId && value.decision) {
+        const actingUser = await ctx.identity.ensureUser({
+          organizationId: env.ORG_ID,
+          entraObjectId: activity.from.aadObjectId ?? activity.from.id,
+          displayName: activity.from.name ?? "Unknown",
+          email: null,
+        });
+        await ctx.reviewWorkflow.recordDecision({
+          organizationId: env.ORG_ID,
+          reviewId: String(value.reviewId),
+          actingUserId: actingUser.id,
+          decision: value.decision as any,
+        });
+        return;
+      }
+      if (value.projectKey && value.idempotencyKey) {
+        const requester = await ctx.identity.ensureUser({
+          organizationId: env.ORG_ID,
+          entraObjectId: activity.from.aadObjectId ?? activity.from.id,
+          displayName: activity.from.name ?? "Unknown",
+          email: null,
+        });
+        const project = await ctx.administration.getJiraProjectByKey(env.ORG_ID, String(value.projectKey));
+        if (!project) return;
+        const { form, idempotencyKey } = parseQaTicketSubmission(value);
+        await ctx.qaTicketWorkflow.createTicket({
+          organizationId: env.ORG_ID,
+          requesterId: requester.id,
+          jiraProjectId: project.id,
+          jiraProjectKey: project.projectKey,
+          form,
+          idempotencyKey,
+        });
+      }
+    } catch (err) {
+      log.error({ err: (err as Error).message }, "failed to process card action from Teams");
+    }
+  });
 }
 
 main().catch((err) => {

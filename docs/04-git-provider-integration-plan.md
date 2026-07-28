@@ -1,6 +1,21 @@
 # Git-Provider Integration Plan
 
-**Status: blocked on one organizational decision — which provider (GitHub, GitLab, or Bitbucket).** `GitProvider` (`src/modules/git-integration/domain.ts`) is fully specified as an interface; no implementation ships in V1.
+**Status: implemented for GitHub** (`GitHubProvider`, `src/modules/git-integration/github-provider.ts`,
+`GIT_PROVIDER_MODE=github`, auth via a personal access token in `GITHUB_TOKEN` — the
+POC choice, matching Jira's service-account-token approach). GitLab/Bitbucket remain
+unimplemented; the interface notes below still apply to whichever gets picked later.
+
+**This adapter is the one piece of the three new integrations (Teams/Jira/GitHub)
+that was actually validated live** — `getPullRequest`, `getPullRequestReviewState`,
+`getChecks`, `getCommit`, and `listPullRequestsForIssue` were all exercised against a
+real throwaway PR on `gauravsimnovus/taskmaster` while building it, confirming the
+Jira-key extraction (branch name + title + body), review-state aggregation, and
+checks mapping all work against real GitHub API responses. `listUserCommits`'s
+search-index-backed lookup showed the one caveat worth knowing: GitHub's commit
+search index has a lag of at least a couple of minutes on very recent commits — a
+direct `getCommit` by SHA is instant, but `listUserCommits`/`listPullRequestsForIssue`
+(both search-API-backed) can miss something pushed moments ago. Not a bug in this
+adapter, just GitHub's own eventual consistency — don't be surprised by it in a demo.
 
 ## Interface (already defined, stable regardless of provider choice)
 

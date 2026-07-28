@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "../../src/config/env.js";
 import { AuditService } from "../../src/modules/audit/index.js";
 import { IdentityService } from "../../src/modules/identity/index.js";
+import { NotificationsService } from "../../src/modules/notifications/index.js";
 import { NoopPolicyEngine, ReviewWorkflowService } from "../../src/modules/review-workflow/index.js";
+import { systemClock } from "../../src/shared/clock.js";
 import { AuthorizationError } from "../../src/shared/errors.js";
 import { resetDatabase } from "../support/reset-db.js";
 import { seedOrganization, seedUser } from "../support/seed.js";
@@ -16,7 +18,12 @@ describe("authorization: server-side role enforcement", () => {
 
   it("rejects a review request whose target reviewer does not hold the lead role", async () => {
     const identity = new IdentityService();
-    const reviewWorkflow = new ReviewWorkflowService(identity, new AuditService(), new NoopPolicyEngine());
+    const reviewWorkflow = new ReviewWorkflowService(
+      identity,
+      new AuditService(),
+      new NoopPolicyEngine(),
+      new NotificationsService(systemClock)
+    );
 
     const developer = await seedUser("Dev", ["developer"]);
     const notALead = await seedUser("NotLead", ["developer"]);
@@ -35,7 +42,12 @@ describe("authorization: server-side role enforcement", () => {
   it("allows a review request when the reviewer does hold the lead role, and is auditable", async () => {
     const identity = new IdentityService();
     const audit = new AuditService();
-    const reviewWorkflow = new ReviewWorkflowService(identity, audit, new NoopPolicyEngine());
+    const reviewWorkflow = new ReviewWorkflowService(
+      identity,
+      audit,
+      new NoopPolicyEngine(),
+      new NotificationsService(systemClock)
+    );
 
     const developer = await seedUser("Dev2", ["developer"]);
     const lead = await seedUser("Lead1", ["lead"]);
@@ -56,7 +68,12 @@ describe("authorization: server-side role enforcement", () => {
 
   it("a disabled user cannot perform any role-gated action", async () => {
     const identity = new IdentityService();
-    const reviewWorkflow = new ReviewWorkflowService(identity, new AuditService(), new NoopPolicyEngine());
+    const reviewWorkflow = new ReviewWorkflowService(
+      identity,
+      new AuditService(),
+      new NoopPolicyEngine(),
+      new NotificationsService(systemClock)
+    );
 
     const developer = await seedUser("SoonDisabled", ["developer"]);
     const lead = await seedUser("Lead2", ["lead"]);

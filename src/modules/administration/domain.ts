@@ -14,3 +14,10 @@ export interface TeamsInstallation {
   teamId: string | null;
   channelId: string | null;
 }
+
+export interface JiraProject {
+  id: string;
+  organizationId: string;
+  projectKey: string;
+  isQaProject: boolean;
+}

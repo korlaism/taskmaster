@@ -7,10 +7,14 @@
 - **Contract tests** (planned, `test/contract/` scaffolded but empty until Phase 1/2 adapters exist) — for `JiraClient`/`GitProvider`/`TeamsClient` implementations: the same test suite runs against `FakeJiraAdapter` and, once built, the real adapter, asserting both satisfy the same interface behavior (e.g. "a duplicate webhook is a no-op," "an invalid signature is rejected"). Writing the fake adapter and the real adapter against one shared contract test suite is what keeps them from silently diverging.
 - **End-to-end** — the manual curl walkthrough in [10-local-development.md](./10-local-development.md) exercises the full install → reminder → submit → digest → channel-post loop against the real HTTP surface; a scripted version of that walkthrough (rather than manual curl) is the natural next step once Microsoft's Teams local test tooling is in the loop (Phase 1).
 
-## What's covered today (33 automated tests, all passing against real Postgres)
+## What's covered today (38 automated tests, all passing against real Postgres)
 
 | Requirement | Test |
 |---|---|
+| Save Draft then Submit both apply (regression: a shared idempotency key across both card buttons made Submit look like a retry of Draft and silently drop it) | `daily-updates.test.ts` — builds a real card via `buildDailyUpdateCard`, submits both actions' `data` in sequence, asserts the final state reflects Submit |
+| Requesting review enqueues exactly one notification, even retried | `review-and-qa-workflow.test.ts` — same idempotency key twice → one `send_review_request_card` outbox row |
+| A stale (unanswered) review request surfaces in the digest | `review-and-qa-workflow.test.ts` — a backdated `review_requests` row appears in `attentionRequired.staleReviewRequests` |
+| QA ticket creation is idempotent and role-gated | `review-and-qa-workflow.test.ts` — retried submission doesn't create a second ticket; a non-QA user is rejected |
 | Metric definitions are deterministic and status-mapping-driven | `metrics.test.ts` — two projects with different workflow status names ("Done" vs "Closed") both roll up correctly |
 | A ticket status change around the cutoff boundary | `metrics.test.ts` — an event exactly at `window_end` is excluded (next cycle), one 1ms before is included |
 | A developer works in two Jira projects with different workflows | `metrics.test.ts` (same test as above — two `jira_projects` with independent `jira_status_mappings`) |
@@ -32,8 +36,8 @@
 ## Explicitly not yet covered (tracked, not silently skipped)
 
 - **Teams delivery returns 403 / Jira returns 429** — `LocalSimTeamsClient.forceNextFailure` exists specifically to enable this test (force a `blocked` or `throttled` outcome and assert the graceful-failure/retry split described in [02-teams-permissions-and-installation.md](./02-teams-permissions-and-installation.md)); a dedicated test using it hasn't been written yet.
-- **A PR has multiple authors or reviewers** — depends on a real `GitProvider` adapter existing (Phase 5); the schema (`pull_request_reviews`, one row per reviewer) already supports it.
-- **Contract tests for Jira/Git adapters** — depend on Phase 2/5 real adapters existing; the fake adapter satisfies the `JiraClient` interface today but isn't yet run through a shared contract suite against a real one.
+- **A PR has multiple authors or reviewers** — `GitHubProvider` now exists and was manually verified live against a real single-author, single-reviewer PR (`docs/04`); a multi-reviewer scenario (`getPullRequestReviewState`'s "latest review per reviewer" aggregation) hasn't been exercised against real data, only reasoned through in the implementation.
+- **Contract tests for Jira/Git/Teams adapters** — `JiraCloudAdapter`, `GitHubProvider`, and `TeamsAppClient` now exist alongside their fake/local-sim counterparts, but there's no shared contract-test suite running the same assertions against both yet (`test/contract/` is still empty) — the real adapters were validated ad hoc (GitHub live against a throwaway PR; Jira and Teams by careful reading of current API docs, no live credentials available). Writing that shared suite is the natural next step before trusting these adapters further.
 - **A lead requests changes after the digest was already published** — the data model supports this cleanly (independent tables), but no test asserts the digest's per-person "review state" field stays stale by design until the next cycle's snapshot. Worth adding once the review-workflow Teams surface (Phase 3) makes this a real user-facing flow rather than a service-layer-only capability.
 - **Microsoft Teams local test tooling (E2E)** — not available in this environment (see [10](./10-local-development.md)); revisit in Phase 1 once a real Teams SDK client and dev tenant are in the loop.
 

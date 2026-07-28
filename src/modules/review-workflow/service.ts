@@ -1,5 +1,7 @@
 import type { AuditService } from "../audit/index.js";
 import type { IdentityService } from "../identity/index.js";
+import type { NotificationsService } from "../notifications/index.js";
+import { dedupeKey } from "../../shared/ids.js";
 import type { PolicyEngine, ReviewRequest, ReviewState } from "./domain.js";
 import * as repo from "./repository.js";
 
@@ -7,8 +9,12 @@ export class ReviewWorkflowService {
   constructor(
     private readonly identity: IdentityService,
     private readonly audit: AuditService,
-    private readonly policyEngine: PolicyEngine
+    private readonly policyEngine: PolicyEngine,
+    private readonly notifications: NotificationsService
   ) {}
+
+  getById = repo.getById;
+  listStale = repo.listStale;
 
   /** "Request review for SIM40-1234 from Lead Name" — the command/button both resolve to this. */
   async requestReview(params: {
@@ -17,6 +23,7 @@ export class ReviewWorkflowService {
     reviewerId: string;
     jiraIssueKey: string;
     pullRequestId?: string;
+    pullRequestUrl?: string;
     branchName?: string;
     commitSha?: string;
     requesterNote?: string;
@@ -25,17 +32,20 @@ export class ReviewWorkflowService {
     await this.identity.requireEnabled(params.requesterId);
     await this.identity.requireRole(params.reviewerId, "lead");
 
-    const request = await repo.createReviewRequest({
+    const { request, isNew } = await repo.createReviewRequest({
       organizationId: params.organizationId,
       requesterId: params.requesterId,
       reviewerId: params.reviewerId,
       jiraIssueKey: params.jiraIssueKey,
       pullRequestId: params.pullRequestId ?? null,
+      pullRequestUrl: params.pullRequestUrl ?? null,
       branchName: params.branchName ?? null,
       commitSha: params.commitSha ?? null,
       requesterNote: params.requesterNote ?? null,
       idempotencyKey: params.idempotencyKey,
     });
+
+    if (!isNew) return request; // retried card/command action — already created and (about to be, or already) notified
 
     await this.audit.record({
       organizationId: params.organizationId,
@@ -45,6 +55,18 @@ export class ReviewWorkflowService {
       targetId: request.id,
       details: { jiraIssueKey: params.jiraIssueKey, reviewerId: params.reviewerId },
     });
+
+    // Sending the reviewer's card goes through the outbox (like every other Teams
+    // send) so it gets retry/backoff for free — the handler (runtime-tick.ts) builds
+    // and sends the actual card, this just records that one should go out.
+    await this.notifications.enqueue({
+      aggregateType: "reminder",
+      aggregateId: request.id,
+      eventType: "send_review_request_card",
+      payload: { organizationId: params.organizationId, reviewId: request.id },
+      dedupeKey: dedupeKey(params.organizationId, "send_review_request_card", request.id),
+    });
+
     return request;
   }
 

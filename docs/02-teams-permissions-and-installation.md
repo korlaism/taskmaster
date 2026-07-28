@@ -1,5 +1,46 @@
 # Teams Permission and Installation Plan
 
+**Status: `TeamsAppClient` (`src/modules/teams-adapter/real-client.ts`) is implemented
+against `@microsoft/teams.apps` v2.0.14's published types and Microsoft Learn's
+documented quickstart, but has never run against a live tenant — no Entra app
+registration existed while building this. The registration steps below are what's
+needed to actually turn `TEAMS_ADAPTER_MODE=live` on; do that, then verify the
+`install.add` capture and card-decision routing in `src/api.ts` still match what the
+real activities look like (they were written from documentation, not observation).**
+
+## Registering the app (do this to get CLIENT_ID / CLIENT_SECRET / TENANT_ID)
+
+The fastest path is the Teams Developer CLI, which provisions the Entra app, the
+Azure Bot resource, and the Teams channel in one command:
+
+```bash
+npm install -g @microsoft/teams.cli
+teams app create --azure --subscription <subscription-id> --resource-group <resource-group>
+```
+
+This writes `TENANT_ID`, `CLIENT_ID`, `CLIENT_SECRET` — copy those into `.env`. If you
+don't have Azure CLI access or your tenant policy requires manual resource creation,
+the equivalent manual steps (Azure Portal or `az` CLI) are:
+
+1. **Entra App Registration** — Azure Portal → Entra ID → App Registrations → New. Note
+   the `Application (client) ID` and `Tenant ID`; create a client secret under
+   *Certificates & secrets*.
+2. **Azure Bot resource** — Azure Portal → Create → search "Bot" → Azure Bot. Choose
+   **Single Tenant**, **Use existing app registration**, and supply the Application ID
+   from step 1.
+3. **Messaging endpoint** — under the Bot resource's *Configuration*, set the messaging
+   endpoint to `https://<your-host>/api/messages` (for local dev, tunnel via
+   [DevTunnels](https://learn.microsoft.com/azure/developer/dev-tunnels/overview) or
+   ngrok and use the tunnel's HTTPS URL).
+4. **Enable the Teams channel** — under the Bot resource's *Channels*, add
+   **Microsoft Teams**.
+5. Set `TEAMS_ADAPTER_MODE=live`, `CLIENT_ID`, `CLIENT_SECRET`, `TENANT_ID` in `.env`
+   and start `npm run dev:api` — it builds the `App` bound to this process's Express
+   server (`setupLiveTeamsApp` in `src/api.ts`) and registers `/api/messages`.
+6. Sideload the app package (manifest + icons) into Teams — via Teams Developer
+   Portal, or `teams app package` if using the CLI-scaffolded project shape — pointing
+   its bot `id` at the Application ID from step 1.
+
 ## Scopes
 
 - **Personal scope**: private reminders, daily-update card, review-request cards, QA ticket creation card.

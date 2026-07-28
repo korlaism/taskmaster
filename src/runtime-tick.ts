@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { env } from "./config/env.js";
 import type { AppContext } from "./composition.js";
+import { buildReviewRequestCard } from "./modules/review-workflow/index.js";
 import { dedupeKey } from "./shared/ids.js";
 import { childLogger } from "./shared/logger.js";
 
@@ -115,6 +117,33 @@ export async function runOneTick(ctx: AppContext, workerId: string): Promise<voi
       }
       if (!outcome.delivered) {
         log.warn({ cycleId, reason: outcome.reason }, "digest publish gracefully abandoned (non-retryable)");
+      }
+    },
+    send_review_request_card: async (event) => {
+      const { organizationId, reviewId } = event.payload as { organizationId: string; reviewId: string };
+      const request = await ctx.reviewWorkflow.getById(reviewId);
+      if (!request) return; // request was somehow removed; nothing to send
+      const requester = await ctx.identity.getUserById(request.requesterId);
+
+      const card = buildReviewRequestCard({
+        reviewId: request.id,
+        jiraIssueKey: request.jiraIssueKey,
+        jiraUrl: `${env.JIRA_BASE_URL}/browse/${request.jiraIssueKey}`,
+        pullRequestUrl: request.pullRequestUrl,
+        branchName: request.branchName,
+        commitSha: request.commitSha,
+        requesterName: requester?.displayName ?? "Unknown",
+        requesterNote: request.requesterNote,
+        acknowledgeIdempotencyKey: randomUUID(),
+        approveIdempotencyKey: randomUUID(),
+        changesRequestedIdempotencyKey: randomUUID(),
+      });
+      const outcome = await ctx.teamsAdapter.sendPersonalCard(organizationId, request.reviewerId, card);
+      if (!outcome.delivered && outcome.retryable) {
+        throw new Error(outcome.reason ?? "delivery failed");
+      }
+      if (!outcome.delivered) {
+        log.warn({ reviewId, reason: outcome.reason }, "review request card delivery gracefully abandoned (non-retryable)");
       }
     },
   });

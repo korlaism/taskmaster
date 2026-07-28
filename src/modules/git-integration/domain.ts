@@ -48,5 +48,11 @@ export interface GitProvider {
   approvePullRequest(repositoryProviderId: string, providerPrId: string): Promise<void>;
   getChecks(repositoryProviderId: string, providerPrId: string): Promise<CheckStatus[]>;
   verifyWebhook(rawBody: string, signatureHeader: string | undefined): boolean;
-  normalizeWebhookEvent(rawBody: unknown): NormalizedWebhookEvent[];
+  /**
+   * `eventTypeHeader` is the provider's out-of-band event-type header (GitHub sends
+   * `X-GitHub-Event` alongside the body, not inside the JSON payload) — optional so a
+   * provider without such a header can omit it and infer the event from payload shape
+   * instead.
+   */
+  normalizeWebhookEvent(rawBody: unknown, eventTypeHeader?: string): NormalizedWebhookEvent[];
 }

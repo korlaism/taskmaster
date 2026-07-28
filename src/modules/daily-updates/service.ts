@@ -53,7 +53,8 @@ export class DailyUpdatesService {
       cycleId: cycle.id,
       cycleDate: cycle.cycleDate,
       userId,
-      idempotencyKey: randomUUID(),
+      draftIdempotencyKey: randomUUID(),
+      submitIdempotencyKey: randomUUID(),
       suggestions,
     });
   }

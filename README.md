@@ -9,15 +9,25 @@ workflow state and metrics — never an LLM. See [docs/](./docs) for the full de
 
 ## Status
 
-**V1 vertical slice.** The workflow engine — scheduling, idempotent submission,
-retry-safe outbox delivery, deterministic metrics, immutable digest snapshots — is
-implemented and tested end to end against a real Postgres. Teams and Jira are stood
-in for with a local simulation and a fake adapter respectively, behind stable
-interfaces (`TeamsClient`, `JiraClient`), pending two organizational decisions (which
-Teams SDK package, Jira Cloud vs Data Center) documented in
-[docs/00-assumptions-and-risks.md](./docs/00-assumptions-and-risks.md). Git-provider
-integration, the review-workflow and QA-ticket Teams cards, and AI summarization are
-later phases — see [docs/09-development-phases.md](./docs/09-development-phases.md).
+**V1 + real integrations, POC stage.** The workflow engine (scheduling, idempotent
+submission, retry-safe outbox delivery, deterministic metrics, immutable digest
+snapshots) plus real adapters for Jira Cloud, GitHub, and the Teams SDK, plus the
+review-request and QA-ticket workflows end to end (service + Adaptive Card + HTTP
+routes) — all implemented and typechecked, 38 automated tests passing against a real
+Postgres. What's real vs. simulated in the default config:
+
+| Integration | Status |
+|---|---|
+| Jira Cloud (`JiraCloudAdapter`) | Implemented against `simnovus.atlassian.net`'s REST API v3; not yet run against live credentials (none available while building it) |
+| GitHub (`GitHubProvider`) | Implemented **and live-validated** against a real PR on this repo |
+| Teams (`TeamsAppClient`) | Implemented against `@microsoft/teams.apps`; no Entra app registration existed to test it live against |
+
+Defaults (`local-sim` Teams, `fake` Jira, no Git provider) still work with zero
+external credentials — see [docs/10-local-development.md](./docs/10-local-development.md).
+Set `TEAMS_ADAPTER_MODE=live`, `JIRA_ADAPTER_MODE=live`, `GIT_PROVIDER_MODE=github` in
+`.env` (with the corresponding credentials) to use the real adapters instead. See
+[docs/09-development-phases.md](./docs/09-development-phases.md) for exactly what's
+left before an end-to-end demo with all three live at once.
 
 ## Documentation
 

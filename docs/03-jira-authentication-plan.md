@@ -1,6 +1,17 @@
 # Jira Authentication Plan
 
-**Status: blocked on one organizational decision — Jira Cloud vs Jira Data Center.** Everything below is written so the answer only changes which adapter file gets written; `JiraClient` (the interface `daily-updates`, `qa-ticket-workflow`, and `metrics` code against) does not change either way.
+**Status: implemented for Jira Cloud.** `JiraCloudAdapter` (`src/modules/jira-integration/jira-cloud-adapter.ts`)
+targets `simnovus.atlassian.net` via a dedicated service account (email + API token,
+`JIRA_ADAPTER_MODE=live`). It uses `/rest/api/3/search/jql` (**not** the legacy
+`/rest/api/3/search`, which Atlassian fully removed in August 2025 — confirmed via
+Atlassian's own deprecation notices before writing this file, not assumed from
+training data) and the granular `/issue/createmeta/{project}/issuetypes[/​{id}]`
+endpoints. It has not yet been exercised against real `simnovus.atlassian.net`
+credentials — no service-account API token was available while building it (see
+docs/00) — so treat the query/mapping logic as implemented-and-reasoned-through
+rather than live-verified, and validate it for real once `JIRA_EMAIL`/`JIRA_API_TOKEN`
+are in `.env`. Jira Data Center is not implemented; the notes below still apply if
+that's ever the deployment target instead.
 
 ## Step 0 — confirm deployment target
 

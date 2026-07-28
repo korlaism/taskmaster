@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "../../src/config/env.js";
-import { fixedClock } from "../../src/shared/clock.js";
+import { fixedClock, systemClock } from "../../src/shared/clock.js";
 import { DailyUpdatesService } from "../../src/modules/daily-updates/index.js";
 import { DigestService } from "../../src/modules/digest/index.js";
 import { IdentityService } from "../../src/modules/identity/index.js";
 import { FakeJiraAdapter } from "../../src/modules/jira-integration/index.js";
 import { MetricsService } from "../../src/modules/metrics/index.js";
+import { NotificationsService } from "../../src/modules/notifications/index.js";
+import { NoopPolicyEngine, ReviewWorkflowService } from "../../src/modules/review-workflow/index.js";
 import { pool } from "../../src/shared/db.js";
+import { AuditService } from "../../src/modules/audit/index.js";
 import { resetDatabase } from "../support/reset-db.js";
 import { seedOrganization, seedUser } from "../support/seed.js";
 
@@ -27,7 +30,13 @@ describe("digest: publish-once and immutability", () => {
   it("publishing twice for the same cycle produces exactly one immutable snapshot", async () => {
     const identity = new IdentityService();
     const dailyUpdates = new DailyUpdatesService(fixedClock("2026-01-15T15:00:00.000Z"), new FakeJiraAdapter());
-    const digest = new DigestService(identity, dailyUpdates, new MetricsService());
+    const reviewWorkflow = new ReviewWorkflowService(
+      identity,
+      new AuditService(),
+      new NoopPolicyEngine(),
+      new NotificationsService(systemClock)
+    );
+    const digest = new DigestService(identity, dailyUpdates, new MetricsService(), reviewWorkflow);
 
     const alice = await seedUser("Alice");
     const cycle = await dailyUpdates.ensureCycleForToday(ORG_CYCLE_CONFIG);
@@ -55,7 +64,13 @@ describe("digest: publish-once and immutability", () => {
   it("a snapshot's content never changes even if submissions change afterward", async () => {
     const identity = new IdentityService();
     const dailyUpdates = new DailyUpdatesService(fixedClock("2026-01-15T15:00:00.000Z"), new FakeJiraAdapter());
-    const digest = new DigestService(identity, dailyUpdates, new MetricsService());
+    const reviewWorkflow = new ReviewWorkflowService(
+      identity,
+      new AuditService(),
+      new NoopPolicyEngine(),
+      new NotificationsService(systemClock)
+    );
+    const digest = new DigestService(identity, dailyUpdates, new MetricsService(), reviewWorkflow);
 
     const alice = await seedUser("Alice");
     const bob = await seedUser("Bob");
@@ -87,7 +102,13 @@ describe("digest: publish-once and immutability", () => {
     // and must still get the channel post enqueued exactly once.
     const identity = new IdentityService();
     const dailyUpdates = new DailyUpdatesService(fixedClock("2026-01-15T15:00:00.000Z"), new FakeJiraAdapter());
-    const digest = new DigestService(identity, dailyUpdates, new MetricsService());
+    const reviewWorkflow = new ReviewWorkflowService(
+      identity,
+      new AuditService(),
+      new NoopPolicyEngine(),
+      new NotificationsService(systemClock)
+    );
+    const digest = new DigestService(identity, dailyUpdates, new MetricsService(), reviewWorkflow);
     const cycle = await dailyUpdates.ensureCycleForToday(ORG_CYCLE_CONFIG);
 
     const beforeCrash = await digest.getOrPublishSnapshot(env.ORG_ID, cycle);

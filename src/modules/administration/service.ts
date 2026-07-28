@@ -11,6 +11,22 @@ export class AdministrationService {
   getOrganization = repo.getOrganization;
   getDigestChannel = repo.getDigestChannel;
   listIntegrationFailures = repo.listIntegrationFailures;
+  getJiraProjectByKey = repo.getJiraProjectByKey;
+  listJiraProjects = repo.listJiraProjects;
+
+  async configureJiraProject(actorUserId: string, organizationId: string, projectKey: string, isQaProject: boolean) {
+    await this.requireAdmin(actorUserId);
+    const project = await repo.upsertJiraProject(organizationId, projectKey, isQaProject);
+    await this.audit.record({
+      organizationId,
+      actorUserId,
+      action: "jira_project.configure",
+      targetType: "jira_project",
+      targetId: project.id,
+      details: { projectKey, isQaProject },
+    });
+    return project;
+  }
 
   async requireAdmin(actorUserId: string): Promise<void> {
     await this.identity.requireRole(actorUserId, "administrator");

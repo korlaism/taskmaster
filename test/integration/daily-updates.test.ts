@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "../../src/config/env.js";
 import { fixedClock } from "../../src/shared/clock.js";
 import { ConflictError } from "../../src/shared/errors.js";
-import { DailyUpdatesService } from "../../src/modules/daily-updates/index.js";
+import { buildDailyUpdateCard, DailyUpdatesService } from "../../src/modules/daily-updates/index.js";
 import { FakeJiraAdapter } from "../../src/modules/jira-integration/index.js";
 import { pool } from "../../src/shared/db.js";
 import { resetDatabase } from "../support/reset-db.js";
@@ -98,6 +98,31 @@ describe("daily-updates: idempotent + revisable submissions", () => {
         completedToday: "too late",
       })
     ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("clicking Save Draft then Submit update on the same card applies the submit (regression: shared idempotency key silently dropped it)", async () => {
+    const user = await seedUser("Priya");
+    const service = new DailyUpdatesService(fixedClock("2026-01-15T15:00:00.000Z"), new FakeJiraAdapter());
+    const cycle = await service.ensureCycleForToday(ORG_CYCLE_CONFIG);
+
+    const card = buildDailyUpdateCard({
+      cycleId: cycle.id,
+      cycleDate: cycle.cycleDate,
+      userId: user.id,
+      draftIdempotencyKey: randomUUID(),
+      submitIdempotencyKey: randomUUID(),
+      suggestions: [],
+    });
+    const actions = (card as any).actions as Array<{ title: string; data: Record<string, unknown> }>;
+    const draftAction = actions.find((a) => a.title === "Save draft")!;
+    const submitAction = actions.find((a) => a.title === "Submit update")!;
+    expect(draftAction.data.idempotencyKey).not.toBe(submitAction.data.idempotencyKey);
+
+    await service.submitFromCard(cycle, { ...draftAction.data, completedToday: "still working on it" });
+    const { submission } = await service.submitFromCard(cycle, { ...submitAction.data, completedToday: "done" });
+
+    expect(submission.status).toBe("submitted");
+    expect(submission.completedToday).toBe("done");
   });
 
   it("two users on the same cycle each get their own submission row", async () => {
