@@ -1,5 +1,7 @@
 # Development Phases
 
+> **Superseded in part (2026-10-06):** product direction and build order are now in [12 — Product direction](./12-product-direction.md). Where this doc disagrees, 12 wins.
+
 ## Phase 0 — Vertical slice (done)
 
 Personal-scope install capture → scheduled reminder → Adaptive Card → idempotent submission → deterministic (if data-thin) metrics → immutable digest snapshot → channel post, all retry-safe. See [10-local-development.md](./10-local-development.md) for how to run it and `test/` for the automated proof of the idempotency/concurrency/DST properties.

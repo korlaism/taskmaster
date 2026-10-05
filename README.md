@@ -45,6 +45,7 @@ left before an end-to-end demo with all three live at once.
 | [09 — Development phases](./docs/09-development-phases.md) | What's next, in order, and its exit criteria |
 | [10 — Local development](./docs/10-local-development.md) | Setup, running, a full manual walkthrough, test harness explained |
 | [11 — Test strategy](./docs/11-test-strategy.md) | What's covered, what isn't yet, and why the tests run against real Postgres |
+| [12 — Product direction](./docs/12-product-direction.md) | **Current direction**: open-source (AGPL) self-hosted bot teammate, RBAC, workflows, build order — supersedes 00/09 where they disagree |
 
 ## Quick start
 
@@ -86,3 +87,7 @@ db/migrations/            # schema (see docs/05-data-model.md)
 test/{unit,integration,contract}/
 docs/                      # the design documents listed above
 ```
+
+## License
+
+AGPL-3.0-only. See [LICENSE](./LICENSE).

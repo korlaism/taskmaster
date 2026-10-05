@@ -1,5 +1,7 @@
 # Assumptions, Unresolved Decisions, Feasibility Risks
 
+> **Superseded in part (2026-10-06):** product direction and build order are now in [12 — Product direction](./12-product-direction.md). Where this doc disagrees, 12 wins.
+
 ## Assumptions
 
 - Single organization, single Teams tenant for V1. Multi-tenant SaaS packaging is out of scope.
